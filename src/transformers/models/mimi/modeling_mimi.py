@@ -473,30 +473,30 @@ class MimiEncoder(nn.Module):
         scaling = 1
 
         # keep track of MimiConv1d submodule layer names for easy encoded length computation
-        mimiconv1d_layer_names = ["layers.0"]
+        conv1d_layer_names = ["layers.0"]
 
         # Downsample to raw audio scale
         for ratio in reversed(config.upsampling_ratios):
             current_scale = scaling * config.num_filters
             # Add residual layers
             for j in range(config.num_residual_layers):
-                mimiconv1d_layer_names.extend([f"layers.{len(model)}.block.1", f"layers.{len(model)}.block.3"])
+                conv1d_layer_names.extend([f"layers.{len(model)}.block.1", f"layers.{len(model)}.block.3"])
                 model += [MimiResnetBlock(config, current_scale, [config.dilation_growth_rate**j, 1])]
             # Add downsampling layers
             model += [nn.ELU()]
-            mimiconv1d_layer_names.append(f"layers.{len(model)}")
+            conv1d_layer_names.append(f"layers.{len(model)}")
             model += [MimiConv1d(config, current_scale, current_scale * 2, kernel_size=ratio * 2, stride=ratio)]
             scaling *= 2
 
         model += [nn.ELU()]
-        mimiconv1d_layer_names.append(f"layers.{len(model)}")
+        conv1d_layer_names.append(f"layers.{len(model)}")
         model += [MimiConv1d(config, scaling * config.num_filters, config.hidden_size, config.last_kernel_size)]
 
         self.layers = nn.ModuleList(model)
-        self._mimiconv1d_layer_names = mimiconv1d_layer_names
+        self._conv1d_layer_names = conv1d_layer_names
 
         # initialize layer_idx for MimiConv1d submodules, necessary for padding_cache
-        for layer_idx, layername in enumerate(self._mimiconv1d_layer_names):
+        for layer_idx, layername in enumerate(self._conv1d_layer_names):
             conv_layer = self.get_submodule(layername)
             setattr(conv_layer, "layer_idx", layer_idx)
 
@@ -1211,7 +1211,7 @@ class MimiEncoderModel(MimiPreTrainedModel):
                 stride=2,
                 bias=False,
                 pad_mode="replicate",
-                layer_idx=len(self.encoder_seanet._mimiconv1d_layer_names),
+                layer_idx=len(self.encoder_seanet._conv1d_layer_names),
             )
 
         self.post_init()
@@ -1254,7 +1254,7 @@ class MimiEncoderModel(MimiPreTrainedModel):
         output_length = input_length
 
         # encoder
-        for layer_name in self.encoder_seanet._mimiconv1d_layer_names:
+        for layer_name in self.encoder_seanet._conv1d_layer_names:
             output_length = self.encoder_seanet.get_submodule(layer_name)._get_output_length(output_length)
 
         # downsample
@@ -1319,7 +1319,7 @@ class MimiEncoderModel(MimiPreTrainedModel):
 
         if use_streaming and padding_cache is None:
             per_layer_padding, per_layer_padding_mode, per_layer_in_channels = [], [], []
-            for layer_name in self.encoder_seanet._mimiconv1d_layer_names:
+            for layer_name in self.encoder_seanet._conv1d_layer_names:
                 per_layer_padding.append(self.encoder_seanet.get_submodule(layer_name).padding_total)
                 per_layer_padding_mode.append(self.encoder_seanet.get_submodule(layer_name).pad_mode)
                 per_layer_in_channels.append(self.encoder_seanet.get_submodule(layer_name).in_channels)
@@ -1330,7 +1330,7 @@ class MimiEncoderModel(MimiPreTrainedModel):
             per_layer_in_channels.append(self.downsample.in_channels)
 
             padding_cache = MimiConv1dPaddingCache(
-                num_layers=len(self.encoder_seanet._mimiconv1d_layer_names) + 1,
+                num_layers=len(self.encoder_seanet._conv1d_layer_names) + 1,
                 per_layer_padding=per_layer_padding,
                 per_layer_padding_mode=per_layer_padding_mode,
                 per_layer_in_channels=per_layer_in_channels,
